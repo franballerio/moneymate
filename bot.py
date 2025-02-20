@@ -1,177 +1,225 @@
 import logging
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+import pandas as pd
+import numpy as np
+from datetime import date
+from typing import Optional, Tuple
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
-# this helps to know what the bot is doing, and if there are any errors
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
 
+class moneyMate:
 
-# function to acces sheets API
-def authenticate_sheets():
-    scope = ["https://www.googleapis.com/auth/spreadsheets",
-             "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(
-        "service_account.json", scope)
-    try:
-        gc = gspread.authorize(creds)
-        return gc
-    except Exception as e:
-        logging.error(f"Error authenticating: {e}")
-        raise
+    # this helps to know if there are any errors
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
 
+    def __init__(self):
+        # we are using a pandas df to store all the data
+        self.df = pd.DataFrame(
+            {'Date': [],
+             'Product': [],
+             'Amount': [],
+             'Category': []
+             })
 
-# this function is called when the user sends the /start command
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # object update contains information about the message
-    # object context contains information about the library
-    await context.bot.send_message(chat_id=update.effective_chat.id,
-                                   text="Hi Im Spendings Master, how can i help you?")
+        self.budgets = {
 
-
-async def add_spending_to_sheets(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.args:
-        try:
-            spending = update.message.text.split(" ", 1)
-            spending = [i.strip() for i in spending[1].split(',')]
-            # authenticates
-            gc = authenticate_sheets()
-            # access the spreadsheet
-            sheet = gc.open("All time spendings").sheet1
-
-            date = update.message.date.isoformat(
-                sep=" ").split(" ")[0].split("-")
-
-            sheet.append_row([update.effective_user.first_name, date[0], date[1], date[2],
-                              spending[0], spending[1], spending[2]], "USER_ENTERED")
-
-            await update.message.reply_text(f"Added: {spending[1]} ✅✅")
-        except Exception as e:
-            logging.error(f"Error adding spending: {e}")
-            await update.message.reply_text("Failed to add spending. Please try again.")
-    else:
-        await update.message.reply_text("Usage: /add <amount>, <product>, <category>. Example: /add 50,candy,groceries, ")
-
-
-async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=update.effective_chat.id,
-                                   text="Sorry, I didn't understand that command.")
-
-
-async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(chat_id=update.effective_chat.id,
-                                   text="Sorry, I didn't understand that command.")
-
-
-async def spent_month_func(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        today = update.message.date.isoformat(
-            sep=" ").split(" ")[0].split("-")
-
-        month = context.args[0] if context.args else today[1]
-
-        gc = authenticate_sheets()
-        sheet = gc.open("All time spendings").worksheet("Months")
-        data = sheet.get_all_records()  # this returns a dict of lists
-
-        # await update.message.reply_text(f"{data}")
-
-        spent = 0
-
-        for row in data:
-            if (row["Year"] == int(today[0]) and row["Month"] == int(month)):
-                spent += int(row["Amount"])
-
-        months = {
-            "1": "January",
-            "2": "February",
-            "3": "March",
-            "4": "April",
-            "5": "May",
-            "6": "June",
-            "7": "July",
-            "8": "August",
-            "9": "September",
-            "10": "October",
-            "11": "November",
-            "12": "December"
         }
 
-        await update.message.reply_text(f"You spent ${spent} in {months[month]}")
+    async def clear_df(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        self.df = pd.DataFrame(
+            {'Date': [],
+             'Product': [],
+             'Amount': [],
+             'Category': []
+             })
 
-    except Exception as e:
-        logging.error(f"Error getting spent: {e}")
-        await update.message.reply_text("Failed to get spent. Please try again.")
+    async def random_spents(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        # Parameters for generating random data
+        categories = ["groceries", "so", "essentials",
+                      "clothes", "entertainment", "transport", "going out"]
+        start_date = "2023-01-01"
+        end_date = "2025-12-31"
+        num_records = 1000
 
+        # Generate random data
+        np.random.seed(42)  # For reproducibility
+        random_dates = pd.to_datetime(np.random.choice(
+            pd.date_range(start_date, end_date), size=num_records))
+        random_categories = np.random.choice(categories, size=num_records)
+        random_amounts = np.random.randint(100, 80001, size=num_records)
 
-async def spent_day_func(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if (context.args):
+        # Create DataFrame
+        df = pd.DataFrame({
+            "Date": random_dates,
+            "Product": "Product",
+            "Amount": random_amounts,
+            "Category": random_categories,
+        })
+
+        # Sorting by date for better usability
+        self.df = df.sort_values(by="Date").reset_index(drop=True)
+
+        await context.bot.send_message(chat_id=update.effective_chat.id,
+                                       text="Random spents generated")
+
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        # object update contains information about the message
+        # object context contains information about the library
+        await context.bot.send_message(chat_id=update.effective_chat.id,
+                                       text="Hi Im Spendings Master, how can i help you?")
+
+    async def add_spending(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        spending = context.args
+
+        if (len(spending) == 3):
+            spending = [i.replace(",", "") for i in spending]
+        else:
+            await context.bot.send_message(chat_id=update.effective_chat.id,
+                                           text=f"🚫 Invalid format 🚫\nTry this format: /add product, spent, category")
+            return
+
+        date = update.message.date.isoformat(
+            sep=" ").split(" ")[0]
+
+        newRow = pd.DataFrame({'Date': [pd.to_datetime(date)],
+                               'Product': [spending[0]],
+                               'Amount': [int(spending[1])],
+                               'Category': [spending[2]]
+                               })
+
+        remaining = self.budgets[spending[2]] - int(spending[1])
+
+        self.df = pd.concat([self.df, newRow], ignore_index=True)
+        self.budgets[spending[2]] = remaining
+
+        await context.bot.send_message(chat_id=update.effective_chat.id,
+                                       text=f"💸  Spent  💸\n\n \t\t📅  {date}\n \t\t📦  {spending[0].capitalize()}\n \t\t💰  ${int(spending[1])}\n \t\t📝  {spending[2].capitalize()}\n\n ✅  Added successfully  ✅")
+
+        if (remaining <= 0):
+            await context.bot.send_message(chat_id=update.effective_chat.id,
+                                           text="🚫 You went over the budget 🚫")
+        return
+
+    async def unknown(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        await context.bot.send_message(chat_id=update.effective_chat.id,
+                                       text="Sorry, I didn't understand that command.")
+        return
+
+    async def balance(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Calculate balance for given time period.
+        Supports querying by: month, year, specific date, or month-year combination.
+        """
+        months = {
+            str(i): month for i, month in enumerate([
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            ], 1)
+        }
+
+        def parse_date_args(args) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+            """Parse command arguments into day, month, year."""
+            today = date.today()
+            if not args:
+                return None, today.month, today.year
+
+            # Convert all args to integers
+            try:
+                numbers = [int(arg) for arg in context.args]
+            except ValueError:
+                raise ValueError("All arguments must be numbers")
+
+            if len(numbers) == 1:
+                num = numbers[0]
+                if 1 <= num <= 12:
+                    return None, num, today.year
+                elif 2020 <= num <= 2025:
+                    return None, None, num
+                else:
+                    raise ValueError(
+                        "Single argument must be month (1-12) or year (2020-2025)")
+
+            elif len(numbers) == 2:
+                month, year = numbers
+                if 1 <= month <= 12 and 2023 <= year <= 2025:
+                    return None, month, year
+                else:
+                    raise ValueError("Format: month (1-12) year (2023-2025)")
+
+            elif len(numbers) == 3:
+                day, month, year = numbers
+                if 1 <= day <= 31 and 1 <= month <= 12 and 2023 <= year <= 2025:
+                    return day, month, year
+                else:
+                    raise ValueError(
+                        "Format: day (1-31) month (1-12) year (2023-2025)")
+
+            raise ValueError("Invalid number of arguments")
+
         try:
-            date = context.args[0].split("/")
-            day, month, year = date
-            gc = authenticate_sheets()
-            sheet = gc.open("All time spendings").worksheet("Days")
-            data = sheet.get_all_records()  # this returns a dict of lists
+            day, month, year = parse_date_args(context.args)
 
-            spent = 0
+            mask = self.df['Date'].dt.year == year
+            if month:
+                mask &= self.df['Date'].dt.month == month
+            if day:
+                mask &= self.df['Date'].dt.day == day
 
-            for row in data:
-                if (row["Year"] == int(year) and row["Month"] == int(month) and row["Day"] == int(day)):
-                    spent += int(row["Amount"])
+            res = self.df[mask]
 
-            await update.message.reply_text(f"On {day}/{month}/{year}, you spent ${spent}")
+            # format the response message
+            if day:
+                date_str = f"{day}-{month}-{year}"
+            elif month:
+                date_str = f"{months[str(month)]} {year}"
+            else:
+                date_str = str(year)
 
+            command = update.message.text.split()[0]
+
+            if command == '/spent':
+                await context.bot.send_message(chat_id=update.effective_chat.id,
+                                               text=f"On {date_str} you spent on:\n{res.iloc[1::].to_string(index=False)}")
+                return
+            if command == '/total':
+                await update.message.reply_text(f"You spent ${res['Amount'].sum():,.2f} in {date_str}")
+                return
+
+        except ValueError as e:
+            await update.message.reply_text(str(e))
+            return
         except Exception as e:
-            logging.error(f"Error getting spent: {e}")
-            await update.message.reply_text("Failed to get spent. Please try again.")
+            await update.message.reply_text("An error occurred while calculating your balance.")
+            return
 
-    else:
-        await update.message.reply_text("Please enter a valid date format, dd/mm/yyyy")
+    async def delete_spending(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if self.df.empty:
+            await update.message.reply_text("No expenses to delete")
+            return
+        else:
+            self.df = self.df.iloc[:-1]
+        await update.message.reply_text("Last expense deleted")
+        return
 
+    async def cat_budget(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        '/budget [category] [budget]'
 
-async def delete_spending(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    gc = authenticate_sheets()
-    sheet = gc.open("All time spendings").sheet1
-    sheet.delete_rows(len(sheet.get_all_records()) + 1)
+        message = context.args
 
-    await update.message.reply_text("Last expense deleted")
+        if (len(message) == 2 and (type(int(message[1])) == int) and (type(message[0]) == str)):
+            category, budget = message
 
+            self.budgets[category] = int(budget)
 
-if __name__ == '__main__':
-    # create the bot application (object)
-    application = ApplicationBuilder().token(
-        'Token').build()
+            await update.message.reply_text(f"Budget correctly allocated  📊\n\nFor this month you only can spent ${budget} in {category}")
+        else:
+            await update.message.reply_text("Format not valid for a budget, try /budget [category] [budget]")
 
-    # this 2 lines tell the bot what to do when /start is sent
-    start_handler = CommandHandler('start', start)
-    application.add_handler(start_handler)
+    async def categories(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        categories = self.budgets.keys
 
-    # spendings_handler = CommandHandler('adds', add_spending)
-    # application.add_handler(spendings_handler)
-
-    spending_handler = CommandHandler('add', add_spending_to_sheets)
-    application.add_handler(spending_handler)
-
-    spent_month = CommandHandler("balance", spent_month_func)
-    application.add_handler(spent_month)
-
-    spent_day = CommandHandler("spent", spent_day_func)
-    application.add_handler(spent_day)
-
-    delete_handler = CommandHandler("undo", delete_spending)
-    application.add_handler(delete_handler)
-
-    # this should be at the end of the file, it tells the bot what to do when an unknown command is sent
-    # so this is triggered when the user sends a command that the bot doesn't know
-    unknown_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, unknown)
-    application.add_handler(unknown_handler)
-
-    unknown_handler = MessageHandler(filters.COMMAND, unknown)
-    application.add_handler(unknown_handler)
-
-    # runs the bot till ctrl+c is pressed
-    application.run_polling()
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"{categories.__str__}")
+        return

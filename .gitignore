@@ -1,6 +1,7 @@
 service_account.json
 bot2.py
+gbot.py
 test.py
 test_sheets_connect.py
-
+.gitignore
 /venv/
